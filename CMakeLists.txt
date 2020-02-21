@@ -1,18 +1,8 @@
-cmake_minimum_required(VERSION 3.1.0)
 
-# Use newer policies if available, up to most recent tested version of CMake.
-if(${CMAKE_VERSION} VERSION_LESS 3.11)
-  cmake_policy(VERSION ${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION})
-else()
-  cmake_policy(VERSION 3.11)
-endif()
-
-# Determine if fmt is built as a subproject (using add_subdirectory)
-# or if it is the master project.
-set(MASTER_PROJECT OFF)
-if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  set(MASTER_PROJECT ON)
-  message(STATUS "CMake version: ${CMAKE_VERSION}")
+# Get version from core.h
+file(READ ${CMAKE_CURRENT_LIST_DIR}/include/fmt/core.h core_h)
+if (NOT core_h MATCHES "FMT_VERSION ([0-9]+)([0-9][0-9])([0-9][0-9])")
+  message(FATAL_ERROR "Cannot get FMT_VERSION from core.h.")
 endif ()
 
 # Joins arguments and places the results in ${result_var}.
@@ -24,33 +14,6 @@ function(join result_var)
   set(${result_var} "${result}" PARENT_SCOPE)
 endfunction()
 
-# Set the default CMAKE_BUILD_TYPE to Release.
-# This should be done before the project command since the latter can set
-# CMAKE_BUILD_TYPE itself (it does so for nmake).
-if (MASTER_PROJECT AND NOT CMAKE_BUILD_TYPE)
-  join(doc "Choose the type of build, options are: None(CMAKE_CXX_FLAGS or "
-           "CMAKE_C_FLAGS used) Debug Release RelWithDebInfo MinSizeRel.")
-  set(CMAKE_BUILD_TYPE Release CACHE STRING ${doc})
-endif ()
-
-option(FMT_PEDANTIC "Enable extra warnings and expensive tests." OFF)
-option(FMT_WERROR "Halt the compilation with an error on compiler warnings."
-       OFF)
-
-# Options that control generation of various targets.
-option(FMT_DOC "Generate the doc target." ${MASTER_PROJECT})
-option(FMT_INSTALL "Generate the install target." ${MASTER_PROJECT})
-option(FMT_TEST "Generate the test target." ${MASTER_PROJECT})
-option(FMT_FUZZ "Generate the fuzz target." OFF)
-option(FMT_CUDA_TEST "Generate the cuda-test target." OFF)
-
-project(FMT CXX)
-
-# Get version from core.h
-file(READ include/fmt/core.h core_h)
-if (NOT core_h MATCHES "FMT_VERSION ([0-9]+)([0-9][0-9])([0-9][0-9])")
-  message(FATAL_ERROR "Cannot get FMT_VERSION from core.h.")
-endif ()
 # Use math to skip leading zeros if any.
 math(EXPR CPACK_PACKAGE_VERSION_MAJOR ${CMAKE_MATCH_1})
 math(EXPR CPACK_PACKAGE_VERSION_MINOR ${CMAKE_MATCH_2})
@@ -66,7 +29,7 @@ if (NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
 endif ()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
-  "${CMAKE_CURRENT_SOURCE_DIR}/support/cmake")
+  "${CMAKE_CURRENT_LIST_DIR}/support/cmake")
 
 include(cxx14)
 include(CheckCXXCompilerFlag)
@@ -121,23 +84,9 @@ if (MSVC)
   set(WERROR_FLAG /WX)
 endif ()
 
-if (MASTER_PROJECT AND CMAKE_GENERATOR MATCHES "Visual Studio")
-  # If Microsoft SDK is installed create script run-msbuild.bat that
-  # calls SetEnv.cmd to set up build environment and runs msbuild.
-  # It is useful when building Visual Studio projects with the SDK
-  # toolchain rather than Visual Studio.
-  include(FindSetEnv)
-  if (WINSDK_SETENV)
-    set(MSBUILD_SETUP "call \"${WINSDK_SETENV}\"")
-  endif ()
-  # Set FrameworkPathOverride to get rid of MSB3644 warnings.
-  set(netfxpath "C:\\Program Files\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.0")
-  file(WRITE run-msbuild.bat "
-    ${MSBUILD_SETUP}
-    ${CMAKE_MAKE_PROGRAM} -p:FrameworkPathOverride=\"${netfxpath}\" %*")
-endif ()
 
 set(strtod_l_headers stdlib.h)
+
 if (APPLE)
   set(strtod_l_headers ${strtod_l_headers} xlocale.h)
 endif ()
@@ -152,7 +101,7 @@ endif ()
 function(add_headers VAR)
   set(headers ${${VAR}})
   foreach (header ${ARGN})
-    set(headers ${headers} include/fmt/${header})
+    set(headers ${headers} ${CMAKE_CURRENT_LIST_DIR}/include/fmt/${header})
   endforeach()
   set(${VAR} ${headers} PARENT_SCOPE)
 endfunction()
@@ -160,12 +109,12 @@ endfunction()
 # Define the fmt library, its includes and the needed defines.
 add_headers(FMT_HEADERS chrono.h color.h compile.h core.h format.h format-inl.h
                         locale.h os.h ostream.h posix.h printf.h ranges.h)
-set(FMT_SOURCES src/format.cc src/os.cc)
+set(FMT_SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/format.cc ${CMAKE_CURRENT_LIST_DIR}/src/os.cc)
 
-add_library(fmt ${FMT_SOURCES} ${FMT_HEADERS} README.rst ChangeLog.rst)
+add_library(fmt ${FMT_SOURCES} ${FMT_HEADERS} ${CMAKE_CURRENT_LIST_DIR}/README.rst ${CMAKE_CURRENT_LIST_DIR}/ChangeLog.rst)
 add_library(fmt::fmt ALIAS fmt)
 
-if (iOS) 
+if (iOS)
   ios_add_universal_build(fmt)
 endif()
 
@@ -183,7 +132,7 @@ endif ()
 target_compile_features(fmt INTERFACE ${FMT_REQUIRED_FEATURES})
 
 target_include_directories(fmt PUBLIC
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
 set(FMT_DEBUG_POSTFIX d)
@@ -221,99 +170,3 @@ target_include_directories(fmt-header-only INTERFACE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
-# Install targets.
-if (FMT_INSTALL)
-  include(GNUInstallDirs)
-  include(CMakePackageConfigHelpers)
-  set(FMT_CMAKE_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/fmt CACHE STRING
-      "Installation directory for cmake files, relative to ${CMAKE_INSTALL_PREFIX}.")
-  set(version_config ${PROJECT_BINARY_DIR}/fmt-config-version.cmake)
-  set(project_config ${PROJECT_BINARY_DIR}/fmt-config.cmake)
-  set(pkgconfig ${PROJECT_BINARY_DIR}/fmt.pc)
-  set(targets_export_name fmt-targets)
-
-  set (INSTALL_TARGETS fmt)
-  if (TARGET fmt-header-only)
-    set(INSTALL_TARGETS ${INSTALL_TARGETS} fmt-header-only)
-  endif ()
-
-  set(FMT_LIB_DIR ${CMAKE_INSTALL_LIBDIR} CACHE STRING
-      "Installation directory for libraries, relative to ${CMAKE_INSTALL_PREFIX}.")
-
-  set(FMT_INC_DIR ${CMAKE_INSTALL_INCLUDEDIR}/fmt CACHE STRING
-      "Installation directory for include files, relative to ${CMAKE_INSTALL_PREFIX}.")
-
-  set(FMT_PKGCONFIG_DIR ${CMAKE_INSTALL_LIBDIR}/pkgconfig CACHE PATH
-      "Installation directory for pkgconfig (.pc) files, relative to ${CMAKE_INSTALL_PREFIX}.")
-
-  # Generate the version, config and target files into the build directory.
-  write_basic_package_version_file(
-    ${version_config}
-    VERSION ${FMT_VERSION}
-    COMPATIBILITY AnyNewerVersion)
-  configure_file(
-    "${PROJECT_SOURCE_DIR}/support/cmake/fmt.pc.in"
-    "${pkgconfig}"
-    @ONLY)
-  configure_package_config_file(
-    ${PROJECT_SOURCE_DIR}/support/cmake/fmt-config.cmake.in
-    ${project_config}
-    INSTALL_DESTINATION ${FMT_CMAKE_DIR})
-  # Use a namespace because CMake provides better diagnostics for namespaced
-  # imported targets.
-  export(TARGETS ${INSTALL_TARGETS} NAMESPACE fmt::
-         FILE ${PROJECT_BINARY_DIR}/${targets_export_name}.cmake)
-
-  # Install version, config and target files.
-  install(
-    FILES ${project_config} ${version_config}
-    DESTINATION ${FMT_CMAKE_DIR})
-  install(EXPORT ${targets_export_name} DESTINATION ${FMT_CMAKE_DIR}
-          NAMESPACE fmt::)
-
-  # Install the library and headers.
-  install(TARGETS ${INSTALL_TARGETS} EXPORT ${targets_export_name}
-          LIBRARY DESTINATION ${FMT_LIB_DIR}
-          ARCHIVE DESTINATION ${FMT_LIB_DIR}
-          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-  install(FILES $<TARGET_PDB_FILE:${INSTALL_TARGETS}>
-          DESTINATION ${FMT_LIB_DIR} OPTIONAL)
-  install(FILES ${FMT_HEADERS} DESTINATION ${FMT_INC_DIR})
-  install(FILES "${pkgconfig}" DESTINATION "${FMT_PKGCONFIG_DIR}")
-endif ()
-
-if (FMT_DOC)
-  add_subdirectory(doc)
-endif ()
-
-if (FMT_TEST)
-  enable_testing()
-  add_subdirectory(test)
-endif ()
-
-# Control fuzzing independent of the unit tests.
-if (FMT_FUZZ)
-  add_subdirectory(test/fuzzing)
-endif ()
-
-set(gitignore ${PROJECT_SOURCE_DIR}/.gitignore)
-if (MASTER_PROJECT AND EXISTS ${gitignore})
-  # Get the list of ignored files from .gitignore.
-  file (STRINGS ${gitignore} lines)
-  LIST(REMOVE_ITEM lines /doc/html)
-  foreach (line ${lines})
-    string(REPLACE "." "[.]" line "${line}")
-    string(REPLACE "*" ".*" line "${line}")
-    set(ignored_files ${ignored_files} "${line}$" "${line}/")
-  endforeach ()
-  set(ignored_files ${ignored_files}
-    /.git /breathe /format-benchmark sphinx/ .buildinfo .doctrees)
-
-  set(CPACK_SOURCE_GENERATOR ZIP)
-  set(CPACK_SOURCE_IGNORE_FILES ${ignored_files})
-  set(CPACK_SOURCE_PACKAGE_FILE_NAME fmt-${FMT_VERSION})
-  set(CPACK_PACKAGE_NAME fmt)
-  set(CPACK_RESOURCE_FILE_README ${PROJECT_SOURCE_DIR}/README.rst)
-  include(CPack)
-endif ()
