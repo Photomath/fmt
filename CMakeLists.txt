@@ -165,6 +165,10 @@ set(FMT_SOURCES src/format.cc src/os.cc)
 add_library(fmt ${FMT_SOURCES} ${FMT_HEADERS} README.rst ChangeLog.rst)
 add_library(fmt::fmt ALIAS fmt)
 
+if (iOS) 
+  ios_add_universal_build(fmt)
+endif()
+
 if (HAVE_STRTOD_L)
   target_compile_definitions(fmt PUBLIC FMT_LOCALE)
 endif ()
